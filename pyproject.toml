@@ -1,0 +1,86 @@
+[project]
+name = "3d-printer-model"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "flask>=3.1.2",
+    "flask-compress>=1.23",
+    "gunicorn>=24.1.1",
+    "numpy>=2.4.1",
+    "onnxruntime>=1.23.2",
+    "opencv-python-headless>=4.13.0.90",
+    "requests>=2.32.5",
+]
+
+
+[project.optional-dependencies]
+dev = [
+    "google-api-python-client-stubs>=1.30.0",
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.6.15",
+    "mkdocstrings-python>=1.16.12",
+    "mypy>=1.17.0",
+    "pymdown-extensions>=10.16.1",
+    "pytest>=8.4.1",
+    "pytest-cov>=6.2.1",
+    "ruff>=0.12.7",
+    "types-requests>=2.32.4.20250611",
+]
+
+[tool.uv.workspace]
+members = [
+  "src/stream_ingestor",
+]
+
+[tool.ruff]
+line-length = 130 # high for top level due to tests
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+  "D203", # `incorrect-blank-line-before-class` (D203) and `no-blank-line-before-class` (D211) are incompatible. Ignoring `incorrect-blank-line-before-class`.
+  "D213", # `multi-line-summary-first-line` (D212) and `multi-line-summary-second-line` (D213) are incompatible. Ignoring `multi-line-summary-second-line`.
+  "S101", # Use of `assert` detected --> Asserts are good in our opinion. Tests use asserts profusely.
+]
+per-file-ignores = { "**/test_*.py" = ["TRY300", "BLE001", "ANN401", "SLF001", "E501", "S105", "ARG001", "ARG002", "S106", "INP001", "PLC0415"] }
+
+[tool.mypy]
+strict = true
+explicit_package_bases = true # Required for src layout
+mypy_path = ["src/stream_ingestor/src"]
+ignore_missing_imports = false
+warn_unused_ignores = false
+
+# Allow untyped imports for specific modules
+[[tool.mypy.overrides]]
+module = []
+
+[tool.pytest.ini_options]
+pythonpath = [
+    ".", 
+    "src"
+]
+testpaths = ["tests", "src/*/tests"]
+addopts = ["--cov", "--cov-report=term-missing", "--import-mode=importlib"]
+markers = [
+    "unit: marks tests as unit tests (fast, isolated)",
+    "integration: marks tests as integration tests (medium speed, real dependencies)",
+    "e2e: marks tests as end-to-end tests (slow, full system)",
+    "circleci: marks tests that can run in CI/CD environments without local credentials",
+    "local_credentials: marks tests that require local credentials.json or token.json files",
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["*/tests/*", "*/__main__.py"]
+
+[tool.coverage.report]
+fail_under = 85 
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]
