@@ -1,15 +1,112 @@
 #!/usr/bin/env python
 """
 Simplified detection model loader - ONNX only for maximum compatibility.
-Based on obico-server's ml_api/lib/detection_model.py
+Based on obico-server's ml_api/lib/detection_model.py and ml_api/lib/onnx.py
 """
 
-import cv2
+import cv2  # type: ignore[import-untyped]
 import numpy as np
 from os import path
+from typing import List, Tuple
 
 # Global for class names
 alt_names = None
+
+
+def nms_cpu(boxes, confs, nms_thresh=0.5, min_mode=False):
+    """Non-maximum suppression on CPU"""
+    x1 = boxes[:, 0]
+    y1 = boxes[:, 1]
+    x2 = boxes[:, 2]
+    y2 = boxes[:, 3]
+
+    areas = (x2 - x1) * (y2 - y1)
+    order = confs.argsort()[::-1]
+
+    keep = []
+    while order.size > 0:
+        idx_self = order[0]
+        idx_other = order[1:]
+
+        keep.append(idx_self)
+
+        xx1 = np.maximum(x1[idx_self], x1[idx_other])
+        yy1 = np.maximum(y1[idx_self], y1[idx_other])
+        xx2 = np.minimum(x2[idx_self], x2[idx_other])
+        yy2 = np.minimum(y2[idx_self], y2[idx_other])
+
+        w = np.maximum(0.0, xx2 - xx1)
+        h = np.maximum(0.0, yy2 - yy1)
+        inter = w * h
+
+        if min_mode:
+            over = inter / np.minimum(areas[order[0]], areas[order[1:]])
+        else:
+            over = inter / (areas[order[0]] + areas[order[1:]] - inter)
+
+        inds = np.where(over <= nms_thresh)[0]
+        order = order[inds + 1]
+
+    return np.array(keep)
+
+
+def post_processing(output, width, height, conf_thresh, nms_thresh, names):
+    """Post-process ONNX model outputs - matches obico-server's format"""
+    box_array = output[0]
+    confs = output[1]
+
+    if type(box_array).__name__ != 'ndarray':
+        box_array = box_array.cpu().detach().numpy()
+        confs = confs.cpu().detach().numpy()
+
+    num_classes = confs.shape[2]
+
+    # [batch, num, 4]
+    box_array = box_array[:, :, 0]
+
+    # [batch, num, num_classes] --> [batch, num]
+    max_conf = np.max(confs, axis=2)
+    max_id = np.argmax(confs, axis=2)
+
+    def box_x1x1x2y2_to_xcycwh_scaled(b):
+        return (
+            float(0.5 * width * (b[0] + b[2])),
+            float(0.5 * height * (b[1] + b[3])),
+            float(width * (b[2] - b[0])),
+            float(height * (b[3] - b[1]))
+        )
+
+    dets_batch = []
+    for i in range(box_array.shape[0]):
+
+        argwhere = max_conf[i] > conf_thresh
+        l_box_array = box_array[i, argwhere, :]
+        l_max_conf = max_conf[i, argwhere]
+        l_max_id = max_id[i, argwhere]
+
+        bboxes = []
+        # nms for each class
+        for j in range(num_classes):
+
+            cls_argwhere = l_max_id == j
+            ll_box_array = l_box_array[cls_argwhere, :]
+            ll_max_conf = l_max_conf[cls_argwhere]
+            ll_max_id = l_max_id[cls_argwhere]
+
+            keep = nms_cpu(ll_box_array, ll_max_conf, nms_thresh)
+
+            if (keep.size > 0):
+                ll_box_array = ll_box_array[keep, :]
+                ll_max_conf = ll_max_conf[keep]
+                ll_max_id = ll_max_id[keep]
+
+                for k in range(ll_box_array.shape[0]):
+                    bboxes.append([ll_box_array[k, 0], ll_box_array[k, 1], ll_box_array[k, 2], ll_box_array[k, 3], ll_max_conf[k], ll_max_conf[k], ll_max_id[k]])
+
+        detections = [(names[int(b[6])], float(b[4]), box_x1x1x2y2_to_xcycwh_scaled((b[0], b[1], b[2], b[3]))) for b in bboxes]
+        dets_batch.append(detections)
+
+    return dets_batch
 
 
 class OnnxNet:
@@ -25,106 +122,43 @@ class OnnxNet:
             providers = ['CPUExecutionProvider']
         
         self.session = ort.InferenceSession(weights_path, providers=providers)
-        self.input_name = self.session.get_inputs()[0].name
-        self.input_shape = self.session.get_inputs()[0].shape
-        
-        # Load metadata
         self.meta = Meta(meta_path)
         
-        # Get expected input dimensions
-        self.net_width = self.input_shape[3] if len(self.input_shape) == 4 else 416
-        self.net_height = self.input_shape[2] if len(self.input_shape) == 4 else 416
-        
-        print(f"ONNX model loaded: input shape {self.input_shape}")
+        print(f"ONNX model loaded with {len(self.session.get_inputs())} inputs, {len(self.session.get_outputs())} outputs")
+        for inp in self.session.get_inputs():
+            print(f"  Input: {inp.name} shape={inp.shape}")
+        for out in self.session.get_outputs():
+            print(f"  Output: {out.name} shape={out.shape}")
     
     def force_cpu(self):
         """Force CPU execution"""
         import onnxruntime as ort
         self.session.set_providers(['CPUExecutionProvider'])
     
-    def detect(self, meta, image, names, thresh=0.5, hier_thresh=0.5, nms=0.45, debug=False):
-        """Run detection on an image"""
-        # Preprocess image
-        h, w = image.shape[:2]
+    def detect(self, meta, image, alt_names, thresh=0.5, hier_thresh=0.5, nms=0.45, debug=False) -> List[Tuple[str, float, Tuple[float, float, float, float]]]:
+        """Run detection on an image - matches obico-server's OnnxNet.detect"""
+        input_h = self.session.get_inputs()[0].shape[2]
+        input_w = self.session.get_inputs()[0].shape[3]
+        width = image.shape[1]
+        height = image.shape[0]
+
+        # Input preprocessing
+        resized = cv2.resize(image, (input_w, input_h), interpolation=cv2.INTER_LINEAR)
+        img_in = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+        img_in = np.transpose(img_in, (2, 0, 1)).astype(np.float32)
+        img_in = np.expand_dims(img_in, axis=0)
+        img_in /= 255.0
+
+        input_name = self.session.get_inputs()[0].name
+        outputs = self.session.run(None, {input_name: img_in})
         
-        # Resize and normalize
-        resized = cv2.resize(image, (self.net_width, self.net_height))
-        
-        # Convert BGR to RGB and normalize to 0-1
-        rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-        normalized = rgb.astype(np.float32) / 255.0
-        
-        # NCHW format (batch, channels, height, width)
-        input_tensor = normalized.transpose(2, 0, 1)
-        input_tensor = np.expand_dims(input_tensor, axis=0)
-        
-        # Run inference
-        outputs = self.session.run(None, {self.input_name: input_tensor})
-        
-        # Parse outputs - format depends on model export
-        detections = self._parse_outputs(outputs, w, h, thresh, nms, names)
-        
-        return detections
-    
-    def _parse_outputs(self, outputs, orig_w, orig_h, thresh, nms_thresh, names):
-        """Parse ONNX model outputs into detection list"""
-        detections = []
-        
-        # The output format varies by model - this handles common YOLO formats
-        output = outputs[0]
-        
-        if len(output.shape) == 3:
-            # Shape: [1, num_detections, 5+num_classes] or [1, 5+num_classes, num_detections]
-            output = output[0]
-            
-            # Check if we need to transpose
-            if output.shape[0] < output.shape[1]:
-                output = output.T
-            
-            boxes = []
-            confidences = []
-            class_ids = []
-            
-            for detection in output:
-                if len(detection) >= 5:
-                    # YOLO format: [x, y, w, h, obj_conf, class1_conf, class2_conf, ...]
-                    x, y, w, h = detection[:4]
-                    obj_conf = detection[4] if len(detection) > 4 else 1.0
-                    
-                    if len(detection) > 5:
-                        class_scores = detection[5:]
-                        class_id = np.argmax(class_scores)
-                        confidence = obj_conf * class_scores[class_id]
-                    else:
-                        class_id = 0
-                        confidence = obj_conf
-                    
-                    if confidence >= thresh:
-                        # Convert from relative to absolute coordinates
-                        abs_x = x * orig_w
-                        abs_y = y * orig_h
-                        abs_w = w * orig_w
-                        abs_h = h * orig_h
-                        
-                        # Convert from center to corner format for NMS
-                        left = abs_x - abs_w / 2
-                        top = abs_y - abs_h / 2
-                        
-                        boxes.append([left, top, abs_w, abs_h])
-                        confidences.append(float(confidence))
-                        class_ids.append(class_id)
-            
-            # Apply NMS
-            if boxes:
-                indices = cv2.dnn.NMSBoxes(boxes, confidences, thresh, nms_thresh)
-                
-                for i in indices:
-                    idx = i[0] if isinstance(i, (list, np.ndarray)) else i
-                    box = boxes[idx]
-                    label = names[class_ids[idx]] if class_ids[idx] < len(names) else 'failure'
-                    detections.append((label, confidences[idx], tuple(box)))
-        
-        return detections
+        if debug:
+            print(f"Model outputs: {len(outputs)} tensors")
+            for i, out in enumerate(outputs):
+                print(f"  Output {i}: shape={out.shape}, min={out.min():.4f}, max={out.max():.4f}")  # type: ignore[union-attr]
+
+        detections = post_processing(outputs, width, height, thresh, nms, meta.names)
+        return detections[0]
 
 
 class Meta:
@@ -152,6 +186,10 @@ class Meta:
         except Exception as e:
             print(f"Warning: Could not load meta file: {e}")
             self.names = ['failure']  # Default class name
+            self.num_classes = 1
+        
+        if not self.names:
+            self.names = ['failure']
             self.num_classes = 1
 
 

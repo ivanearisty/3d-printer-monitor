@@ -12,15 +12,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
 WORKDIR /app
 
-# Copy requirements first for better caching
-COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Copy dependency files from root
+COPY pyproject.toml uv.lock ./
+
+# Install dependencies using uv
+RUN uv sync --frozen --no-dev
 
 # Copy application code
-COPY . .
+COPY ml_api/ .
 
 # Download model weights
 RUN mkdir -p /model_cache/ml_api/onnx && \
@@ -30,4 +34,4 @@ RUN mkdir -p /model_cache/ml_api/onnx && \
 
 EXPOSE 3333
 
-CMD ["gunicorn", "--bind", "0.0.0.0:3333", "--workers", "1", "--timeout", "120", "server:app"]
+CMD ["uv", "run", "gunicorn", "--bind", "0.0.0.0:3333", "--workers", "1", "--timeout", "120", "server:app"]

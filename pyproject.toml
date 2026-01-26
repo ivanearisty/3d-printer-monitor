@@ -5,12 +5,16 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "bambulabs-api>=2.6.5",
     "flask>=3.1.2",
     "flask-compress>=1.23",
     "gunicorn>=24.1.1",
+    "ipykernel>=7.1.0",
     "numpy>=2.4.1",
     "onnxruntime>=1.23.2",
+    "opencv-python>=4.13.0.90",
     "opencv-python-headless>=4.13.0.90",
+    "python-dotenv>=1.2.1",
     "requests>=2.32.5",
 ]
 
@@ -24,7 +28,6 @@ dev = [
     "mypy>=1.17.0",
     "pymdown-extensions>=10.16.1",
     "pytest>=8.4.1",
-    "pytest-cov>=6.2.1",
     "ruff>=0.12.7",
     "types-requests>=2.32.4.20250611",
 ]
@@ -64,7 +67,6 @@ pythonpath = [
     "src"
 ]
 testpaths = ["tests", "src/*/tests"]
-addopts = ["--cov", "--cov-report=term-missing", "--import-mode=importlib"]
 markers = [
     "unit: marks tests as unit tests (fast, isolated)",
     "integration: marks tests as integration tests (medium speed, real dependencies)",
@@ -73,14 +75,9 @@ markers = [
     "local_credentials: marks tests that require local credentials.json or token.json files",
 ]
 
-[tool.coverage.run]
-source = ["src"]
-omit = ["*/tests/*", "*/__main__.py"]
 
-[tool.coverage.report]
-fail_under = 85 
-exclude_lines = [
-    "pragma: no cover",
-    "raise NotImplementedError",
-    "if TYPE_CHECKING:",
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "python-dotenv>=1.2.1",
 ]

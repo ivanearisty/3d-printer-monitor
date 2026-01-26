@@ -1,15 +1,14 @@
 version: '3.8'
 
-# Minimal 3D Print Failure Detection Setup
-# Only includes the ML API for detection and your stream analyzer
-# No Django backend, no frontend, no Redis, no database
+# 3D Print Failure Detection for Bambu Lab Printers
+# Uses external RTSP camera + ML API for AI detection
 
 services:
-  # ML API - The failure detection model
+  # ML API - The failure detection model (ONNX)
   ml_api:
     build:
-      context: ./ml_api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ml_api/Dockerfile
     hostname: ml_api
     restart: unless-stopped
     ports:
@@ -26,35 +25,35 @@ services:
       timeout: 10s
       retries: 3
 
-  # Your stream analyzer that watches the RTSP feed
-  stream_analyzer:
+  # Print Monitor - Monitors Bambu printer + RTSP camera for failures
+  print_monitor:
     build:
-      context: ./stream_analyzer
+      context: .
       dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
       ml_api:
         condition: service_healthy
     environment:
-      # RTSP Camera Settings
-      CAMERA_USERNAME: ${CAMERA_USERNAME:-admin}
-      CAMERA_PASSWORD: ${CAMERA_PASSWORD:-password}
-      CAMERA_HOST: ${CAMERA_HOST:-192.168.1.100}
+      # Required: Bambu Lab Printer Credentials
+      PRINTER_ACCESS_CODE: ${PRINTER_ACCESS_CODE:?PRINTER_ACCESS_CODE is required}
+      PRINTER_SERIAL_NUMBER: ${PRINTER_SERIAL_NUMBER:?PRINTER_SERIAL_NUMBER is required}
+      PRINTER_IP_ADDRESS: ${PRINTER_IP_ADDRESS:?PRINTER_IP_ADDRESS is required}
+
+      # Required: RTSP Camera Settings
+      CAMERA_HOST: ${CAMERA_HOST:?CAMERA_HOST is required}
       CAMERA_PORT: ${CAMERA_PORT:-554}
+      CAMERA_USERNAME: ${CAMERA_USERNAME:-}
+      CAMERA_PASSWORD: ${CAMERA_PASSWORD:-}
       CAMERA_STREAM_PATH: ${CAMERA_STREAM_PATH:-stream1}
-      
-      # Detection Settings
+
+      # ML API URL (internal docker network)
       ML_API_URL: http://ml_api:3333
-      DETECTION_THRESHOLD: ${DETECTION_THRESHOLD:-0.40}
-      ANALYSIS_INTERVAL_SECONDS: ${ANALYSIS_INTERVAL_SECONDS:-10}
-      CONSECUTIVE_FAILURES_TO_STOP: ${CONSECUTIVE_FAILURES_TO_STOP:-3}
-      MAX_SNAPSHOT_SIZE_MB: ${MAX_SNAPSHOT_SIZE_MB:-200}
-      
-      # Printer Control (webhook to stop printer - works with OctoPrint, Klipper, etc.)
-      PRINTER_STOP_WEBHOOK: ${PRINTER_STOP_WEBHOOK:-}
-      PRINTER_API_KEY: ${PRINTER_API_KEY:-}
-    volumes:
-      - ./snapshots:/app/snapshots
+
+      # Detection Settings (optional)
+      CHECK_INTERVAL_PRINTING: ${CHECK_INTERVAL_PRINTING:-1800}
+      CHECK_INTERVAL_IDLE: ${CHECK_INTERVAL_IDLE:-60}
+      CONSECUTIVE_FAILURES_TO_STOP: ${CONSECUTIVE_FAILURES_TO_STOP:-2}
 
 volumes:
   model_cache:
