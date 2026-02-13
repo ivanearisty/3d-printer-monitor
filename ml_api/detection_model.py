@@ -1,7 +1,12 @@
 #!/usr/bin/env python
 """
 Simplified detection model loader - ONNX only for maximum compatibility.
-Based on obico-server's ml_api/lib/detection_model.py and ml_api/lib/onnx.py
+
+Supports two model formats:
+- YOLOv4 (Obico/Darknet): 2 output tensors [boxes, confidences]
+- YOLOv8/v11 (Ultralytics): 1 output tensor [1, 4+num_classes, num_detections]
+
+The model format is auto-detected based on the number of ONNX output tensors.
 """
 
 import cv2  # type: ignore[import-untyped]
@@ -50,8 +55,8 @@ def nms_cpu(boxes, confs, nms_thresh=0.5, min_mode=False):
     return np.array(keep)
 
 
-def post_processing(output, width, height, conf_thresh, nms_thresh, names):
-    """Post-process ONNX model outputs - matches obico-server's format"""
+def post_processing_yolov4(output, width, height, conf_thresh, nms_thresh, names):
+    """Post-process YOLOv4 ONNX outputs (2 tensors: boxes + confidences)."""
     box_array = output[0]
     confs = output[1]
 
@@ -109,34 +114,107 @@ def post_processing(output, width, height, conf_thresh, nms_thresh, names):
     return dets_batch
 
 
+def post_processing_yolo11(output, input_w, input_h, width, height, conf_thresh, nms_thresh, names):
+    """
+    Post-process YOLOv8/v11 ONNX output (single tensor).
+
+    Output shape: [1, 4 + num_classes, num_detections]
+    - First 4 rows: x_center, y_center, w, h (in pixels relative to input size)
+    - Remaining rows: class confidence scores
+    """
+    raw = output[0]  # shape: [1, 4+C, N]
+    predictions = raw[0].T  # shape: [N, 4+C]
+
+    num_classes = predictions.shape[1] - 4
+    boxes_xywh = predictions[:, :4]  # x_center, y_center, w, h in input-size pixels
+    class_scores = predictions[:, 4:]
+
+    max_scores = np.max(class_scores, axis=1)
+    class_ids = np.argmax(class_scores, axis=1)
+
+    # Filter by confidence
+    mask = max_scores > conf_thresh
+    boxes_xywh = boxes_xywh[mask]
+    max_scores = max_scores[mask]
+    class_ids = class_ids[mask]
+
+    if len(max_scores) == 0:
+        return [[]]
+
+    # Convert xywh (input-pixel coords) to x1y1x2y2 for NMS
+    x1 = boxes_xywh[:, 0] - boxes_xywh[:, 2] / 2
+    y1 = boxes_xywh[:, 1] - boxes_xywh[:, 3] / 2
+    x2 = boxes_xywh[:, 0] + boxes_xywh[:, 2] / 2
+    y2 = boxes_xywh[:, 1] + boxes_xywh[:, 3] / 2
+    xyxy = np.stack([x1, y1, x2, y2], axis=1)
+
+    # Scale factors from input size to original image size
+    sx = width / input_w
+    sy = height / input_h
+
+    # NMS per class
+    all_detections = []
+    for j in range(num_classes):
+        cls_mask = class_ids == j
+        if not np.any(cls_mask):
+            continue
+
+        cls_boxes = xyxy[cls_mask]
+        cls_scores = max_scores[cls_mask]
+        cls_xywh = boxes_xywh[cls_mask]
+
+        keep = nms_cpu(cls_boxes, cls_scores, nms_thresh)
+        if keep.size == 0:
+            continue
+
+        for k in keep:
+            # Scale xywh to original image coordinates
+            xc = float(cls_xywh[k, 0] * sx)
+            yc = float(cls_xywh[k, 1] * sy)
+            w = float(cls_xywh[k, 2] * sx)
+            h = float(cls_xywh[k, 3] * sy)
+            label = names[j] if j < len(names) else f"class_{j}"
+            all_detections.append((label, float(cls_scores[k]), (xc, yc, w, h)))
+
+    return [all_detections]
+
+
 class OnnxNet:
     """ONNX Runtime based neural network for failure detection"""
-    
+
     def __init__(self, weights_path: str, meta_path: str, use_gpu: bool = False):
         import onnxruntime as ort
-        
+
         # Configure execution providers
         if use_gpu:
             providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
         else:
             providers = ['CPUExecutionProvider']
-        
+
         self.session = ort.InferenceSession(weights_path, providers=providers)
         self.meta = Meta(meta_path)
-        
-        print(f"ONNX model loaded with {len(self.session.get_inputs())} inputs, {len(self.session.get_outputs())} outputs")
+
+        # Auto-detect model format based on number of output tensors
+        num_outputs = len(self.session.get_outputs())
+        if num_outputs == 1:
+            self.model_format = 'yolo11'
+        else:
+            self.model_format = 'yolov4'
+
+        print(f"ONNX model loaded ({self.model_format} format)")
+        print(f"  {len(self.session.get_inputs())} inputs, {num_outputs} outputs")
         for inp in self.session.get_inputs():
             print(f"  Input: {inp.name} shape={inp.shape}")
         for out in self.session.get_outputs():
             print(f"  Output: {out.name} shape={out.shape}")
-    
+
     def force_cpu(self):
         """Force CPU execution"""
         import onnxruntime as ort
         self.session.set_providers(['CPUExecutionProvider'])
-    
+
     def detect(self, meta, image, alt_names, thresh=0.5, hier_thresh=0.5, nms=0.45, debug=False) -> List[Tuple[str, float, Tuple[float, float, float, float]]]:
-        """Run detection on an image - matches obico-server's OnnxNet.detect"""
+        """Run detection on an image. Auto-dispatches to YOLOv4 or YOLOv8/v11 post-processing."""
         input_h = self.session.get_inputs()[0].shape[2]
         input_w = self.session.get_inputs()[0].shape[3]
         width = image.shape[1]
@@ -151,13 +229,19 @@ class OnnxNet:
 
         input_name = self.session.get_inputs()[0].name
         outputs = self.session.run(None, {input_name: img_in})
-        
+
         if debug:
             print(f"Model outputs: {len(outputs)} tensors")
             for i, out in enumerate(outputs):
                 print(f"  Output {i}: shape={out.shape}, min={out.min():.4f}, max={out.max():.4f}")  # type: ignore[union-attr]
 
-        detections = post_processing(outputs, width, height, thresh, nms, meta.names)
+        names = meta.names or alt_names or ['failure']
+
+        if self.model_format == 'yolo11':
+            detections = post_processing_yolo11(outputs, input_w, input_h, width, height, thresh, nms, names)
+        else:
+            detections = post_processing_yolov4(outputs, width, height, thresh, nms, names)
+
         return detections[0]
 
 
