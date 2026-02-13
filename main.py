@@ -54,7 +54,7 @@ class FailureMonitor:
         analyzer: ImageAnalyzer,
         immediate_threshold: float = 0.70,
         consecutive_threshold: float = 0.45,
-        check_interval_printing: float = 1800.0,  # 30 minutes
+        check_interval_printing: float = 30.0,  # 30 seconds
         check_interval_idle: float = 60.0,
         consecutive_failures_to_stop: int = 2,
     ) -> None:
@@ -210,7 +210,7 @@ def main() -> None:
 
     # Optional settings
     ml_api_url = os.getenv("ML_API_URL", "http://localhost:3333")
-    check_interval_printing = float(os.getenv("CHECK_INTERVAL_PRINTING", "1800"))
+    check_interval_printing = float(os.getenv("CHECK_INTERVAL_PRINTING", "30"))
     check_interval_idle = float(os.getenv("CHECK_INTERVAL_IDLE", "60"))
     consecutive_to_stop = int(os.getenv("CONSECUTIVE_FAILURES_TO_STOP", "2"))
 

@@ -43,7 +43,14 @@ class BambuController:
         """Connect to the printer via MQTT."""
         from bambulabs_api import Printer
 
-        logger.info(f"Connecting to Bambu printer at {self.ip_address}...")
+        # Log connection target (do not log sensitive access code)
+        logger.info(
+            f"Connecting to Bambu printer at {self.ip_address} (serial={self.serial_number})..."
+        )
+        if self.access_code:
+            logger.debug("Access code provided: yes (value hidden)")
+        else:
+            logger.debug("Access code provided: no")
         
         self._printer = Printer(
             access_code=self.access_code,

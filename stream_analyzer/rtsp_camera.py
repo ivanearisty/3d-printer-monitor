@@ -54,7 +54,12 @@ class RTSPCamera:
 
     def connect(self, timeout: int = 10) -> bool:
         """Connect to the RTSP stream."""
-        logger.info(f"Connecting to RTSP camera at {self.host}:{self.port}...")
+        # Log connection target; avoid revealing passwords.
+        if self.username:
+            sanitized = f"rtsp://{self.username}:***@{self.host}:{self.port}/{self.stream_path}"
+            logger.info(f"Connecting to RTSP camera: {sanitized}")
+        else:
+            logger.info(f"Connecting to RTSP camera: rtsp://{self.host}:{self.port}/{self.stream_path}")
 
         # Force FFmpeg (used by OpenCV) to use TCP for RTSP to avoid UDP packet loss.
         # TCP guarantees packet delivery which prevents "bad cseq" and decoding errors
@@ -73,6 +78,8 @@ class RTSPCamera:
 
         if not self._cap.isOpened():
             logger.error("Failed to connect to RTSP stream")
+            # Log more details for troubleshooting
+            logger.debug(f"rtsp_url='{self.rtsp_url}', host='{self.host}', port={self.port}, stream_path='{self.stream_path}', username_provided={bool(self.username)}")
             return False
 
         logger.info("✅ Connected to RTSP camera")

@@ -10,20 +10,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-
 WORKDIR /app
 
 # Copy dependency files
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml ./
 
-# Install dependencies using uv
-RUN uv sync --frozen --no-dev
+# Install dependencies using pip (avoid external ghcr dependency on `uv`)
+# Pip will read `pyproject.toml` and install declared dependencies.
+RUN pip install --no-cache-dir .
 
 # Copy application code
 COPY main.py ./
 COPY stream_analyzer/ ./stream_analyzer/
 
 # Run main.py - restart policy in docker-compose handles crashes
-CMD ["uv", "run", "python", "main.py"]
+CMD ["python", "main.py"]
