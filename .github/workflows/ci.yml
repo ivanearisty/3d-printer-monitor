@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+
+      - run: uv sync --frozen
+        name: Install dependencies
+
+      - run: uv run ruff check .
+        name: Lint
+
+      - run: uv run mypy .
+        name: Type check
+
+      - run: uv run pytest tests/ -m "not integration and not e2e and not local_credentials"
+        name: Unit tests
+
+  build-and-push:
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./ml_api/Dockerfile
+          push: true
+          tags: ghcr.io/ivanearisty/3d-printer-ml-api:latest
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ghcr.io/ivanearisty/3d-printer-monitor:latest
