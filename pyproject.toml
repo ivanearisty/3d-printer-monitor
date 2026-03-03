@@ -44,22 +44,38 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
-  "D203", # `incorrect-blank-line-before-class` (D203) and `no-blank-line-before-class` (D211) are incompatible. Ignoring `incorrect-blank-line-before-class`.
-  "D213", # `multi-line-summary-first-line` (D212) and `multi-line-summary-second-line` (D213) are incompatible. Ignoring `multi-line-summary-second-line`.
-  "S101", # Use of `assert` detected --> Asserts are good in our opinion. Tests use asserts profusely.
+  "D203",    # incompatible with D211
+  "D213",    # incompatible with D212
+  "S101",    # asserts are fine
+  "TRY003",  # raise-vanilla-args: too verbose for simple raises
+  "EM101",   # raw-string-in-exception: too verbose
+  "EM102",   # f-string-in-exception: too verbose
+  "G004",    # logging-f-string: f-strings are more readable
+  "FBT001",  # boolean-type-hint-positional-argument
+  "FBT002",  # boolean-default-value-positional-argument
+  "PLR2004", # magic-value-comparison: too strict for ML code
+  "PLR0913", # too-many-arguments: ML functions need many params
+  "TRY300",  # try-consider-else: returns in try blocks are fine
 ]
-per-file-ignores = { "**/test_*.py" = ["TRY300", "BLE001", "ANN401", "SLF001", "E501", "S105", "ARG001", "ARG002", "S106", "INP001", "PLC0415"] }
+
+[tool.ruff.lint.per-file-ignores]
+"**/test_*.py" = ["TRY300", "BLE001", "ANN401", "SLF001", "E501", "S105", "ARG001", "ARG002", "S106", "INP001", "PLC0415", "T201"]
+"**/conftest.py" = ["PLC0415"]
+"ml_api/*.py" = ["T201", "S104", "S201", "PLW0603", "PLC0415", "INP001"]
+"notebooks/*.ipynb" = ["T201", "ERA001", "E501", "NPY002", "E402", "INP001", "PTH123", "A004", "PTH207"]
+"tests/*.ipynb" = ["T201", "INP001"]
 
 [tool.mypy]
 strict = true
 explicit_package_bases = true # Required for src layout
-mypy_path = ["src/stream_ingestor/src"]
+mypy_path = ["src/stream_ingestor/src", "stubs"]
 ignore_missing_imports = false
 warn_unused_ignores = false
 
-# Allow untyped imports for specific modules
+# detection_model is a local ml_api module resolved at runtime via PYTHONPATH
 [[tool.mypy.overrides]]
-module = []
+module = "detection_model"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 pythonpath = [

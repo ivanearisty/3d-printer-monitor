@@ -1,6 +1,4 @@
-#!/usr/bin/env python
-"""
-Image Analyzer for 3D Print Failure Detection
+"""Image Analyzer for 3D Print Failure Detection.
 
 Sends images to the ML API and returns detection results.
 """
@@ -24,6 +22,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Detection:
     """A single failure detection result."""
+
     confidence: float
     label: str
     box: tuple[float, float, float, float]  # x, y, width, height
@@ -32,24 +31,26 @@ class Detection:
 @dataclass
 class AnalysisResult:
     """Result of analyzing an image."""
+
     detections: list[Detection]
     max_confidence: float
     has_failure: bool
 
     @classmethod
-    def empty(cls) -> "AnalysisResult":
+    def empty(cls) -> AnalysisResult:
         """Create an empty result (no detections)."""
         return cls(detections=[], max_confidence=0.0, has_failure=False)
 
 
 class ImageAnalyzer:
-    """Analyzes images for 3D print failures using the ML API."""
+    """Analyze images for 3D print failures using the ML API."""
 
     def __init__(
         self,
         ml_api_url: str = "http://localhost:3333",
         timeout: int = 30,
-    ):
+    ) -> None:
+        """Initialize the analyzer with ML API connection settings."""
         self.ml_api_url = ml_api_url.rstrip("/")
         self.timeout = timeout
 
@@ -57,19 +58,20 @@ class ImageAnalyzer:
         """Check if ML API is available."""
         try:
             response = requests.get(f"{self.ml_api_url}/hc/", timeout=5)
-            return response.ok
-        except Exception:
+        except requests.exceptions.ConnectionError:
             return False
+        else:
+            return response.ok
 
-    def analyze(self, image: "Image.Image") -> AnalysisResult:
-        """
-        Analyze an image for print failures.
+    def analyze(self, image: Image.Image) -> AnalysisResult:
+        """Analyze an image for print failures.
 
         Args:
             image: PIL Image to analyze
 
         Returns:
             AnalysisResult with detections and max confidence
+
         """
         try:
             # Convert PIL Image to base64 JPEG
@@ -85,7 +87,7 @@ class ImageAnalyzer:
             )
 
             if not response.ok:
-                logger.warning(f"ML API error: {response.status_code}")
+                logger.warning("ML API error: %s", response.status_code)
                 return AnalysisResult.empty()
 
             # Parse response
@@ -112,6 +114,6 @@ class ImageAnalyzer:
         except requests.exceptions.ConnectionError:
             logger.warning("ML API not available")
             return AnalysisResult.empty()
-        except Exception as e:
-            logger.error(f"Error analyzing image: {e}")
+        except Exception:
+            logger.exception("Error analyzing image")
             return AnalysisResult.empty()

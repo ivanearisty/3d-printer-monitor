@@ -5,26 +5,27 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-import collections.abc
+
 from stream_analyzer.bambu_controller import BambuController, PrinterState
 
 if TYPE_CHECKING:
+    import collections.abc
+
     from bambulabs_api import Printer
-    from stream_analyzer.bambu_controller import BambuController, PrinterState
 
 
 class TestPrinterConnection:
     """Tests for connecting to the Bambu printer."""
 
-    def test_printer_connected(self, printer: "Printer") -> None:
+    def test_printer_connected(self, printer: Printer) -> None:
         """Test that printer is connected via MQTT."""
         assert printer.mqtt_client_connected(), "Printer should be connected"
 
-    def test_printer_mqtt_ready(self, printer: "Printer") -> None:
+    def test_printer_mqtt_ready(self, printer: Printer) -> None:
         """Test that printer MQTT client is ready."""
         assert printer.mqtt_client_ready(), "Printer MQTT should be ready"
 
-    def test_get_printer_state(self, printer: "Printer") -> None:
+    def test_get_printer_state(self, printer: Printer) -> None:
         """Test that we can get printer state."""
         state = printer.get_state()
         assert state is not None, "Should be able to get printer state"
@@ -40,7 +41,7 @@ class TestPrinterConnection:
             "UNKNOWN",
         ), f"Unexpected state: {state_name}"
 
-    def test_get_wifi_signal(self, printer: "Printer") -> None:
+    def test_get_wifi_signal(self, printer: Printer) -> None:
         """Test that we can get WiFi signal strength."""
         signal = printer.wifi_signal()
         assert signal is not None, "Should be able to get WiFi signal"
@@ -51,6 +52,7 @@ class TestBambuController:
 
     @pytest.fixture(scope="session")
     def controller(self) -> collections.abc.Generator[BambuController, None, None]:
+        """Create and connect a BambuController for tests."""
         import os
 
         access_code = os.getenv("PRINTER_ACCESS_CODE")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 from pathlib import Path
+from typing import Any
 
 import pytest
 import requests
@@ -16,9 +17,10 @@ class TestMLAPIConnection:
         """Test that ML API is running and healthy."""
         try:
             response = requests.get(f"{ml_api_url}/hc/", timeout=10)
-            assert response.ok, f"ML API health check failed: {response.status_code}"
         except requests.exceptions.ConnectionError:
             pytest.fail(f"ML API not available at {ml_api_url}. Start it with: docker compose up ml_api")
+        else:
+            assert response.ok, f"ML API health check failed: {response.status_code}"
 
 
 class TestFailureDetection:
@@ -34,9 +36,9 @@ class TestFailureDetection:
         except requests.exceptions.ConnectionError:
             pytest.skip("ML API not available")
 
-    def _analyze_image(self, image_path: Path, ml_api_url: str) -> list[dict]:
+    def _analyze_image(self, image_path: Path, ml_api_url: str) -> list[dict[str, Any]]:
         """Send image to ML API and return detections."""
-        with open(image_path, "rb") as f:
+        with image_path.open("rb") as f:
             image_bytes = f.read()
 
         img_base64 = base64.b64encode(image_bytes).decode("utf-8")
@@ -48,7 +50,8 @@ class TestFailureDetection:
         )
 
         assert response.ok, f"ML API request failed: {response.status_code}"
-        return response.json().get("detections", [])
+        result: list[dict[str, Any]] = response.json().get("detections", [])
+        return result
 
     def test_bad1_detects_failure(self, ml_api_url: str) -> None:
         """Test that bad1.jpeg is detected as a failed print."""
@@ -157,9 +160,9 @@ class TestGoodPrintDetection:
         except requests.exceptions.ConnectionError:
             pytest.skip("ML API not available")
 
-    def _analyze_image(self, image_path: Path, ml_api_url: str) -> list[dict]:
+    def _analyze_image(self, image_path: Path, ml_api_url: str) -> list[dict[str, Any]]:
         """Send image to ML API and return detections."""
-        with open(image_path, "rb") as f:
+        with image_path.open("rb") as f:
             image_bytes = f.read()
 
         img_base64 = base64.b64encode(image_bytes).decode("utf-8")
@@ -171,7 +174,8 @@ class TestGoodPrintDetection:
         )
 
         assert response.ok, f"ML API request failed: {response.status_code}"
-        return response.json().get("detections", [])
+        result: list[dict[str, Any]] = response.json().get("detections", [])
+        return result
 
     def test_good1_no_high_confidence_detection(self, ml_api_url: str) -> None:
         """Test that good1.jpeg does not trigger high-confidence failure detection."""
@@ -248,7 +252,7 @@ class TestGoodPrintDetection:
             print(
                 f"{name}: {result['total_detections']} detections, "
                 f"{result['high_confidence_count']} above threshold, "
-                f"max confidence: {result['max_confidence']:.3f}"
+                f"max confidence: {result['max_confidence']:.3f}",
             )
 
         # Assert none have high-confidence false positives

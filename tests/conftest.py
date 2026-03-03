@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Generator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -12,7 +11,7 @@ import pytest
 from dotenv import load_dotenv
 
 if TYPE_CHECKING:
-    from bambulabs_api import Printer
+    from collections.abc import Generator
 
 # Load environment variables
 load_dotenv()
@@ -21,7 +20,7 @@ EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
 
 
 @pytest.fixture(scope="session")
-def printer() -> Generator["Printer", None, None]:
+def printer() -> Generator[object, None, None]:
     """Create and connect to printer for the test session."""
     from bambulabs_api import Printer
 
@@ -37,20 +36,20 @@ def printer() -> Generator["Printer", None, None]:
     assert serial is not None
     assert ip_address is not None
 
-    printer = Printer(access_code=access_code, serial=serial, ip_address=ip_address)
-    printer.connect()
+    p = Printer(access_code=access_code, serial=serial, ip_address=ip_address)
+    p.connect()
 
     # Wait for MQTT connection
     for _ in range(30):
-        if printer.mqtt_client_ready():
+        if p.mqtt_client_ready():
             break
         time.sleep(1)
     else:
         pytest.fail("Failed to connect to printer MQTT")
 
-    yield printer
+    yield p
 
-    printer.disconnect()
+    p.disconnect()
 
 
 @pytest.fixture(scope="session")

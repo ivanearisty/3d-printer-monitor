@@ -1,8 +1,6 @@
-#!/usr/bin/env python
-"""
-3D Print Failure Detection Monitor for Bambu Lab Printers
+"""3D Print Failure Detection Monitor for Bambu Lab Printers.
 
-Monitors a Bambu Lab printer using an external RTSP camera and 
+Monitors a Bambu Lab printer using an external RTSP camera and
 automatically stops prints when failures are detected.
 """
 
@@ -11,6 +9,7 @@ import os
 import sys
 import time
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -20,8 +19,8 @@ from stream_analyzer.rtsp_camera import RTSPCamera
 
 # Configure logging: console + rotating file handler
 log_dir = os.getenv("LOG_DIR", "logs")
-os.makedirs(log_dir, exist_ok=True)
-log_file = os.path.join(log_dir, "monitor.log")
+Path(log_dir).mkdir(parents=True, exist_ok=True)
+log_file = Path(log_dir) / "monitor.log"
 
 # Root logger
 root_logger = logging.getLogger()
@@ -33,7 +32,7 @@ stream_handler.setFormatter(formatter)
 root_logger.addHandler(stream_handler)
 
 # Rotating file handler to avoid unbounded log growth
-file_handler = RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=5)
+file_handler = RotatingFileHandler(str(log_file), maxBytes=5 * 1024 * 1024, backupCount=5)
 file_handler.setFormatter(formatter)
 root_logger.addHandler(file_handler)
 
@@ -41,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 
 class FailureMonitor:
-    """Monitors Bambu printer for print failures using AI detection."""
+    """Monitor Bambu printer for print failures using AI detection."""
 
     # Two-tier detection thresholds
     IMMEDIATE_STOP_THRESHOLD = 0.70  # Immediate stop for obvious failures
@@ -58,6 +57,7 @@ class FailureMonitor:
         check_interval_idle: float = 60.0,
         consecutive_failures_to_stop: int = 2,
     ) -> None:
+        """Initialize the failure monitor with printer components and thresholds."""
         self.controller: BambuController = controller
         self.camera: RTSPCamera = camera
         self.analyzer: ImageAnalyzer = analyzer
@@ -71,8 +71,7 @@ class FailureMonitor:
         self.running = False
 
     def check_for_failure(self) -> bool:
-        """
-        Check current camera frame for failures.
+        """Check current camera frame for failures.
 
         Returns True if print should be stopped.
         """
@@ -92,19 +91,21 @@ class FailureMonitor:
             # Always disconnect to avoid keeping RTSP/FFmpeg running continuously.
             try:
                 self.camera.disconnect()
-            except Exception:
+            except OSError:
                 logger.debug("Error while disconnecting camera", exc_info=True)
 
         # Log result
         if result.has_failure:
-            logger.info(f"Detection: max_confidence={result.max_confidence:.3f}")
+            logger.info("Detection: max_confidence=%s", f"{result.max_confidence:.3f}")
         else:
             logger.info("No failures detected")
 
         # Tier 1: Immediate stop for high confidence
         if result.max_confidence >= self.immediate_threshold:
             logger.warning(
-                f"🚨 HIGH CONFIDENCE FAILURE! {result.max_confidence:.2f} >= {self.immediate_threshold} - IMMEDIATE STOP"
+                "HIGH CONFIDENCE FAILURE! %s >= %s - IMMEDIATE STOP",
+                f"{result.max_confidence:.2f}",
+                self.immediate_threshold,
             )
             return True
 
@@ -112,41 +113,43 @@ class FailureMonitor:
         if result.max_confidence >= self.consecutive_threshold:
             self.consecutive_failures += 1
             logger.warning(
-                f"🚨 Failure detected! Confidence: {result.max_confidence:.2f}, "
-                f"Consecutive: {self.consecutive_failures}/{self.consecutive_failures_to_stop}"
+                "Failure detected! Confidence: %s, Consecutive: %s/%s",
+                f"{result.max_confidence:.2f}",
+                self.consecutive_failures,
+                self.consecutive_failures_to_stop,
             )
             if self.consecutive_failures >= self.consecutive_failures_to_stop:
                 return True
         else:
             if self.consecutive_failures > 0:
-                logger.info("✅ No failure detected, resetting counter")
+                logger.info("No failure detected, resetting counter")
             self.consecutive_failures = 0
 
         return False
 
     def run(self) -> None:
-        """Main monitoring loop."""
+        """Run the main monitoring loop."""
         self.running = True
 
         logger.info("=" * 60)
         logger.info("3D Print Failure Detection Monitor")
         logger.info("=" * 60)
-        logger.info(f"Immediate Stop Threshold: {self.immediate_threshold}")
-        logger.info(f"Consecutive Threshold: {self.consecutive_threshold}")
-        logger.info(f"Check Interval (printing): {self.check_interval_printing}s")
-        logger.info(f"Check Interval (idle): {self.check_interval_idle}s")
-        logger.info(f"Consecutive Failures to Stop: {self.consecutive_failures_to_stop}")
+        logger.info("Immediate Stop Threshold: %s", self.immediate_threshold)
+        logger.info("Consecutive Threshold: %s", self.consecutive_threshold)
+        logger.info("Check Interval (printing): %ss", self.check_interval_printing)
+        logger.info("Check Interval (idle): %ss", self.check_interval_idle)
+        logger.info("Consecutive Failures to Stop: %s", self.consecutive_failures_to_stop)
         logger.info("=" * 60)
 
         while self.running:
             try:
                 state = self.controller.get_state()
-                logger.info(f"Printer state: {state.value}")
+                logger.info("Printer state: %s", state.value)
 
                 if state == PrinterState.PRINTING:
                     # Start monitoring if not already
                     if not self.is_monitoring:
-                        logger.info("🖨️ Print started - beginning failure detection")
+                        logger.info("Print started - beginning failure detection")
                         self.is_monitoring = True
                         self.consecutive_failures = 0
 
@@ -159,13 +162,13 @@ class FailureMonitor:
                     time.sleep(self.check_interval_printing)
 
                 elif state == PrinterState.PAUSED:
-                    logger.info("⏸️ Print paused")
+                    logger.info("Print paused")
                     time.sleep(self.check_interval_idle)
 
                 else:
                     # Idle or unknown state
                     if self.is_monitoring:
-                        logger.info("✅ Print finished - stopping failure detection")
+                        logger.info("Print finished - stopping failure detection")
                         self.is_monitoring = False
                         self.consecutive_failures = 0
 
@@ -173,8 +176,8 @@ class FailureMonitor:
 
             except KeyboardInterrupt:
                 raise
-            except Exception as e:
-                logger.error(f"Error in monitoring loop: {e}")
+            except Exception:
+                logger.exception("Error in monitoring loop")
                 time.sleep(self.check_interval_idle)
 
     def stop(self) -> None:
@@ -183,7 +186,7 @@ class FailureMonitor:
 
 
 def main() -> None:
-    """Main entry point."""
+    """Run the main entry point."""
     load_dotenv()
 
     # Required: Bambu printer credentials
@@ -240,7 +243,7 @@ def main() -> None:
 
     # Check ML API
     if not analyzer.health_check():
-        logger.warning("⚠️ ML API not available - will retry during monitoring")
+        logger.warning("ML API not available - will retry during monitoring")
 
     # Create and run monitor
     monitor = FailureMonitor(

@@ -1,6 +1,4 @@
-#!/usr/bin/env python
-"""
-RTSP Camera Module
+"""RTSP Camera Module.
 
 Handles RTSP camera stream capture for 3D print monitoring.
 """
@@ -8,20 +6,23 @@ Handles RTSP camera stream capture for 3D print monitoring.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from collections import deque
 from typing import TYPE_CHECKING
 
 import cv2  # type: ignore[import-untyped]
-import numpy as np
 from PIL import Image
+
+if TYPE_CHECKING:
+    import numpy as np
 
 logger = logging.getLogger(__name__)
 
 
 class RTSPCamera:
-    """Captures frames from an RTSP camera stream."""
+    """Capture frames from an RTSP camera stream."""
 
     def __init__(
         self,
@@ -30,7 +31,8 @@ class RTSPCamera:
         username: str = "",
         password: str = "",
         stream_path: str = "stream1",
-    ):
+    ) -> None:
+        """Initialize camera with connection parameters."""
         self.host = host
         self.port = port
         self.username = username
@@ -57,14 +59,13 @@ class RTSPCamera:
         # Log connection target; avoid revealing passwords.
         if self.username:
             sanitized = f"rtsp://{self.username}:***@{self.host}:{self.port}/{self.stream_path}"
-            logger.info(f"Connecting to RTSP camera: {sanitized}")
+            logger.info("Connecting to RTSP camera: %s", sanitized)
         else:
-            logger.info(f"Connecting to RTSP camera: rtsp://{self.host}:{self.port}/{self.stream_path}")
+            logger.info("Connecting to RTSP camera: rtsp://%s:%s/%s", self.host, self.port, self.stream_path)
 
         # Force FFmpeg (used by OpenCV) to use TCP for RTSP to avoid UDP packet loss.
         # TCP guarantees packet delivery which prevents "bad cseq" and decoding errors
         # when the network is lossy (e.g., unstable WiFi). This may add a small latency.
-        import os
         os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
         self._cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
@@ -79,10 +80,13 @@ class RTSPCamera:
         if not self._cap.isOpened():
             logger.error("Failed to connect to RTSP stream")
             # Log more details for troubleshooting
-            logger.debug(f"rtsp_url='{self.rtsp_url}', host='{self.host}', port={self.port}, stream_path='{self.stream_path}', username_provided={bool(self.username)}")
+            logger.debug(
+                "rtsp_url='%s', host='%s', port=%s, stream_path='%s', username_provided=%s",
+                self.rtsp_url, self.host, self.port, self.stream_path, bool(self.username),
+            )
             return False
 
-        logger.info("✅ Connected to RTSP camera")
+        logger.info("Connected to RTSP camera")
 
         # Start background frame grabber
         self._start_grabber()
@@ -92,7 +96,7 @@ class RTSPCamera:
             with self._frame_lock:
                 if self._frame_buffer:
                     self._connected = True
-                    logger.info("📷 Camera ready")
+                    logger.info("Camera ready")
                     return True
             time.sleep(0.1)
 
@@ -108,7 +112,7 @@ class RTSPCamera:
         self._connected = False
         with self._frame_lock:
             self._frame_buffer.clear()
-        logger.info("📷 Camera disconnected")
+        logger.info("Camera disconnected")
 
     def is_connected(self) -> bool:
         """Check if camera is connected."""
@@ -132,7 +136,7 @@ class RTSPCamera:
             self._grabber_thread = None
 
     def _grabber_loop(self) -> None:
-        """Continuously grab frames to keep buffer fresh."""
+        """Grab frames continuously to keep buffer fresh."""
         while self._grabber_running and self._cap and self._cap.isOpened():
             ret, frame = self._cap.read()
             if ret:
