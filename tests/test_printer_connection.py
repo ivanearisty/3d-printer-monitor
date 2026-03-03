@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from bambulabs_api import Printer
 
 
+@pytest.mark.integration
 class TestPrinterConnection:
     """Tests for connecting to the Bambu printer."""
 
@@ -47,6 +48,7 @@ class TestPrinterConnection:
         assert signal is not None, "Should be able to get WiFi signal"
 
 
+@pytest.mark.integration
 class TestBambuController:
     """Tests for connecting to the Bambu printer using BambuController."""
 

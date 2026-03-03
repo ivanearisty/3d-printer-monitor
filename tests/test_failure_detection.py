@@ -10,6 +10,7 @@ import pytest
 import requests
 
 
+@pytest.mark.integration
 class TestMLAPIConnection:
     """Tests for ML API availability."""
 
@@ -23,6 +24,7 @@ class TestMLAPIConnection:
             assert response.ok, f"ML API health check failed: {response.status_code}"
 
 
+@pytest.mark.integration
 class TestFailureDetection:
     """Tests for failure detection on example images."""
 
@@ -142,6 +144,7 @@ class TestFailureDetection:
             )
 
 
+@pytest.mark.integration
 class TestGoodPrintDetection:
     """Tests to verify good prints do NOT trigger failure detections."""
 

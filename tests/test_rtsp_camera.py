@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 from stream_analyzer.rtsp_camera import RTSPCamera
 
 
+@pytest.mark.integration
 class TestRTSPCamera:
     """Tests for connecting to the RTSP camera and grabbing frames."""
 
